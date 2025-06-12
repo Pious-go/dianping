@@ -2,9 +2,9 @@ package com.hmdp.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.Result;
+import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.Voucher;
 import com.hmdp.mapper.VoucherMapper;
-import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherService;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -54,5 +54,17 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         seckillVoucherService.save(seckillVoucher);
         //保存秒杀优惠券信息到Reids，Key名中包含优惠券ID，Value为优惠券的剩余数量
         stringRedisTemplate.opsForValue().set(SECKILL_STOCK_KEY + voucher.getId(),voucher.getStock().toString());
+
+
+        // 默认时区
+//        ZoneId zoneId = ZoneId.systemDefault();
+//
+//        // 保存秒杀库存到Redis中
+//        Map<String, Object> voucherMap = new HashMap<>();
+//        voucherMap.put("id", voucher.getId());
+//        voucherMap.put("stock", voucher.getStock());
+//        voucherMap.put("beginTime", voucher.getBeginTime().atZone(zoneId).toInstant().toEpochMilli());  // 转换为时间戳（以毫秒为单位）
+//        voucherMap.put("endTime", voucher.getEndTime().atZone(zoneId).toInstant().toEpochMilli());  // 转换为时间戳（以毫秒为单位）
+//        stringRedisTemplate.opsForHash().putAll(SECKILL_STOCK_KEY + voucher.getId(),voucherMap);
     }
 }

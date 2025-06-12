@@ -86,14 +86,14 @@ public class CacheClient {
 
         // 4.不存在，根据id查询数据库
         R r = dbFallback.apply(id);
-        // 5.不存在，返回错误
+        // 5.判断数据库是否存在店铺数据,不存在，返回错误
         if (r == null) {
             // 将空值写入redis
             stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
             // 返回错误信息
             return null;
         }
-        // 6.存在，写入redis
+        // 6.数据库中存在，重建缓存，并返回店铺数据
         this.set(key, r, time, unit);
         return r;
     }
@@ -195,7 +195,7 @@ public class CacheClient {
                 Thread.sleep(50);
                 return queryWithMutex(keyPrefix, id, type, dbFallback, time, unit);
             }
-            // 4.4.获取锁成功，再次检查缓存（双检）
+            // 4.4.获取锁成功，再次检查缓存（双检）（保证即使多个线程同时竞争锁，最终只有一个会真正执行数据库查询）
             String cachedData = stringRedisTemplate.opsForValue().get(key);
             if (StrUtil.isNotBlank(cachedData)) {
                 return JSONUtil.toBean(cachedData, type);

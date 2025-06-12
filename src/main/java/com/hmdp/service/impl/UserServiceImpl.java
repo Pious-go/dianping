@@ -60,19 +60,69 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         return Result.ok();
     }
 
+    //优化：改造发验证码，增加黑名单功能和邮箱发验证码服务
+//    @Override
+//    public Result sendCode(String phone, HttpSession session, HttpServletRequest request) throws MessagingException {
+//        // 1.校验手机号
+//        if (RegexUtils.isPhoneInvalid(phone)) {
+//            // 2.如果不符合，返回错误信息
+//            return Result.fail("手机号格式错误！");
+//        }
+//        // 3. 获取客户端IP地址
+//        String clientIpAddr = request.getRemoteAddr();
+//
+//        // 4.如果存在锁，直接返回失败
+//        String phoneGetCodeLock = stringRedisTemplate.opsForValue().get(GET_CODE_LOCK + phone);
+//        if (phoneGetCodeLock != null) {
+//            return Result.fail("获取验证码过快，请稍后重试！");
+//        }
+//
+//        // 5.检查两个黑名单中的次数
+//        String blacklistPhoneCount = stringRedisTemplate.opsForValue().get(GET_CODE_BLACKLIST_PHONE + phone);
+//        int getCodePhoneCount = (blacklistPhoneCount != null) ? Integer.parseInt(blacklistPhoneCount) : 0;
+//        if (getCodePhoneCount >= 400) {
+//            return Result.fail("获取验证码次数过多，您的手机号已被限制！");
+//        }
+//
+//        String blacklistIpAddrCount = stringRedisTemplate.opsForValue().get(GET_CODE_BLACKLIST_IP_ADDR + clientIpAddr);
+//        int getCodeIpAddrCount = (blacklistIpAddrCount != null) ? Integer.parseInt(blacklistIpAddrCount) : 0;
+//        if (getCodeIpAddrCount >= 300) {
+//            return Result.fail("获取验证码次数过多，您的IP已被限制！");
+//        }
+//
+//        // 6.更新锁和黑名单
+//        stringRedisTemplate.opsForValue().set(GET_CODE_BLACKLIST_PHONE + phone, String.valueOf(getCodePhoneCount + 1), REFRESH_BLACKLIST_TTL, TimeUnit.HOURS);
+//        stringRedisTemplate.opsForValue().set(GET_CODE_BLACKLIST_IP_ADDR + clientIpAddr, String.valueOf(getCodeIpAddrCount + 1), REFRESH_BLACKLIST_TTL, TimeUnit.HOURS);
+//        stringRedisTemplate.opsForValue().set(GET_CODE_LOCK + phone, "1", GET_CODE_LOCK_TTL, TimeUnit.MINUTES);
+//
+//        // 7.校验通过，生成验证码
+////        String code = RandomUtil.randomNumbers(6);
+////        String code = "123123"; //为了方便测试，改成固定值
+//        String code = MailUtils.achieveCode();
+//        // 8.保存验证码到 redis，并上锁
+//        stringRedisTemplate.opsForValue().set(LOGIN_CODE_KEY + phone, code, LOGIN_CODE_TTL, TimeUnit.MINUTES);
+//
+//        // 9.发送验证码
+//        log.info("发送短信验证码成功，验证码：{}", code);
+//        //发送验证码
+//        MailUtils.sendtoMail(phone, code);
+//        // 10.返回ok
+//        return Result.ok();
+//    }
+
     @Override
     public Result login(LoginFormDTO loginForm, HttpSession session) {
         //得到客户端传来的手机号和验证码
         String phone = loginForm.getPhone();
         String code = loginForm.getCode();
         //校验手机号和验证码
-        if(RegexUtils.isPhoneInvalid(phone)){
+        if (RegexUtils.isPhoneInvalid(phone)) {
             return Result.fail("手机号码格式不正确！");
         }
         // String sessionCode = (String)session.getAttribute("code");
         //获取redis中的验证码
-        String redisCode  = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
-        if(!redisCode.equals(code) || code == null){
+        String redisCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
+        if (!redisCode.equals(code) || code == null) {
             return Result.fail("验证码有错误！");
         }
         //正确的话根据手机号查询用户
@@ -80,9 +130,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 //        queryWrapper.eq(User::getPhone, phone);
 //        User user = userService.getOne(queryWrapper);
         User user = query().eq("phone", phone).one();
-        if(user == null){
+        if (user == null) {
             //不存在则创建新用户，并保存到数据库
-            user =  createUserWithPhone(phone);
+            user = createUserWithPhone(phone);
         }
         //保存到session
         //session.setAttribute("user",user);
@@ -99,7 +149,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 //        userMap.put("nickName", userDTO.getNickName());
         Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
                 CopyOptions.create().setIgnoreNullValue(true)
-                .setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
+                        .setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
 
         //存储
         String tokenKey = LOGIN_USER_KEY + token;
@@ -108,9 +158,73 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         stringRedisTemplate.expire(tokenKey, 30, TimeUnit.MINUTES);
         //登陆成功则删除验证码信息
         stringRedisTemplate.delete(LOGIN_CODE_KEY + phone);
-        //返回towken
+        //返回token
         return Result.ok(token);
     }
+
+    //登录功能优化，优化点：使用分离存储策略避免Redis中的用户信息冗余（同一用户多次登录，生成多份token）
+//    @Override
+//    public Result login(LoginFormDTO loginForm, HttpSession session) {
+//        String phone = loginForm.getPhone();
+//        String code = loginForm.getCode();
+//        // 1. 校验手机号格式
+//        if (RegexUtils.isPhoneInvalid(phone)) {
+//            return Result.fail("手机号码格式不正确！");
+//        }
+//        // 2. 从Redis获取验证码
+//        String redisCodeKey = LOGIN_CODE_KEY + phone;
+//        String redisCode = stringRedisTemplate.opsForValue().get(redisCodeKey);
+//        // 3. 验证码校验（包含null检查）
+//        if (code == null || !code.equals(redisCode)) {
+//            // 3. 不一致，报错
+//            return Result.fail("验证码有误！");
+//        }
+//        // 4. 验证码一致，根据手机号查询用户
+//        User user = query().eq("phone", phone).one();
+//        if (user == null) {
+//            user = createUserWithPhone(phone);  // 创建新用户
+//        }
+//        // 5. 生成Token（每次登录都不同）
+//        String token = UUID.randomUUID().toString();
+//        // 6. 核心优化：分离存储
+//        // 6.1 存储Token->用户ID映射（热数据）
+//        String tokenKey = LOGIN_TOKEN_KEY + token;
+//        stringRedisTemplate.opsForValue().set(
+//                tokenKey,
+//                user.getId().toString(),
+//                LOGIN_TOKEN_TTL,
+//                TimeUnit.MINUTES
+//        );
+//        // 6.2 存储用户信息（温数据）
+//        String userKey = LOGIN_USER_KEY + user.getId();
+//        if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(userKey))) {
+//            // 用户信息不存在时才存储
+//            UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+//            Map<String, Object> userMap = BeanUtil.beanToMap(
+//                    userDTO,
+//                    new HashMap<>(),
+//                    CopyOptions.create()
+//                            .setIgnoreNullValue(true)
+//                            .setFieldValueEditor((fieldName, fieldValue) ->
+//                                    fieldValue != null ? fieldValue.toString() : null
+//                            )
+//            );
+//            stringRedisTemplate.opsForHash().putAll(userKey, userMap);
+//            stringRedisTemplate.expire(userKey, LOGIN_USER_TTL, TimeUnit.HOURS);
+//        } else {
+//            // 存在则刷新TTL
+//            stringRedisTemplate.expire(userKey, LOGIN_USER_TTL, TimeUnit.HOURS);
+//        }
+//
+//        // 7. 清理验证码
+//        stringRedisTemplate.delete(redisCodeKey);
+//
+//        // 8. 返回Token
+//        return Result.ok(token);
+//    }
+
+
+
 
     @Override
     public Result sign() {
